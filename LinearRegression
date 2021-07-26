@@ -1,0 +1,284 @@
+import os
+import pandas as pd
+import numpy as np
+
+# Set working directory
+os.chdir("C:\\Users\\anusa\\Downloads\\")
+
+# Read in the data
+TrainRaw = pd.read_csv("PropertyPrice_Train.csv")
+PredictionRaw = pd.read_csv("PropertyPrice_Prediction.csv")
+
+# Create Source Column in both Train and Test
+TrainRaw['Source'] = "Train"
+PredictionRaw['Source'] = "Test"
+
+# Combine Train and Test
+FullRaw = pd.concat([TrainRaw, PredictionRaw], axis = 0)
+FullRaw.shape
+
+
+# Lets drop "Id" column from the data as it is not going to assist us in our model
+FullRaw = FullRaw.drop(['Id'], axis = 1) 
+# FullRaw.drop(['Id'], axis = 1, inplace = True) 
+
+# Check for NAs
+FullRaw.isnull().sum()
+
+# Check data types of the variables
+FullRaw.dtypes
+
+# # Increase the print output
+# pd.set_option('display.max_rows', 500)
+# pd.set_option('display.max_columns', 500)
+# pd.set_option('display.width', 1000)
+
+
+############################
+# Missing value imputation
+############################
+
+# Garage variable
+tempMode = TrainRaw["Garage"].mode()[0]
+FullRaw["Garage"] = FullRaw["Garage"].fillna(tempMode)  
+# FullRaw["Garage"].fillna(tempMode, inplace = True)      
+
+# Garage_Built_Year
+tempMedian = TrainRaw["Garage_Built_Year"].median()
+FullRaw["Garage_Built_Year"] = FullRaw["Garage_Built_Year"].fillna(tempMedian)   
+
+# All NAs should be gone now
+FullRaw.isnull().sum()
+
+# ## Automated code
+
+# Subset_Condition = FullRaw['Source'] == "Train" # This will contain Trues and Falses. True for all train rows and False for all test rows
+# Half_Rows = 0.5*FullRaw[Subset_Condition].shape[0]
+
+# for column in FullRaw.columns:    
+#     Total_NAs = FullRaw.loc[Subset_Condition, column].isnull().sum()    
+#     if(Total_NAs < Half_Rows):         
+#         if(FullRaw[column].dtype == "object"): 
+#           print("Categ: ", column)
+#           tempMode = FullRaw.loc[Subset_Condition, column].mode()[0]
+#           print(tempMode, "\n")
+#           FullRaw[column] = FullRaw[column].fillna(tempMode)          
+#         else:
+#           print("Cont: ", column)
+#           tempMedian = FullRaw.loc[Subset_Condition, column].median()
+#           print(tempMedian, "\n")
+#           FullRaw[column].fillna(tempMedian, inplace = True)
+#     else:           
+#           FullRaw.drop([column], axis = 1, inplace = True)
+          
+
+############################
+# Correlation check
+############################
+
+import seaborn as sns
+
+corrDf = FullRaw.corr()
+# corrDf.head()
+sns.heatmap(corrDf, 
+        xticklabels=corrDf.columns,
+        yticklabels=corrDf.columns, cmap='coolwarm_r')
+
+
+############################
+# Dummy variable creation
+############################
+
+FullRaw2 = pd.get_dummies(FullRaw, drop_first = True) # 'Source'  column will change to 'Source_Train' and it contains 0s and 1s
+FullRaw2.shape
+FullRaw.shape
+
+
+############################
+# Sampling
+############################
+
+# Step 1: Divide into Train and Finaltest
+Train2 = FullRaw2[FullRaw2['Source_Train'] == 1].drop(['Source_Train'], axis = 1).copy()
+FinalTest = FullRaw2[FullRaw2['Source_Train'] == 0].drop(['Source_Train'], axis = 1).copy()
+
+Train2.shape
+FinalTest.shape
+
+
+# Step 2: Divide Train further into Train and Test by random sampling
+from sklearn.model_selection import train_test_split
+Train, Test = train_test_split(Train2, train_size=0.8, random_state = 150)
+
+Train.shape
+Test.shape
+
+# Step 3: Divide into Xs (Indepenedents) and Y (Dependent)
+Train_X = Train.drop(['Sale_Price'], axis = 1).copy()
+Train_Y = Train['Sale_Price'].copy()
+Test_X = Test.drop(['Sale_Price'], axis = 1).copy()
+Test_Y = Test['Sale_Price'].copy()
+
+Train_X.shape
+Train_Y.shape
+Test_X.shape
+Test_Y.shape
+
+############################
+# Add Intercept Column
+############################
+
+# In Python, linear regression function does NOT account for an intercept by default.
+# So, we need to explicitely add intercept (in the df) - a column called "const" with all values being 1 in it.
+from statsmodels.api import add_constant
+Train_X = add_constant(Train_X)
+Test_X = add_constant(Test_X)
+
+Train_X.shape
+Test_X.shape
+
+#########################
+# VIF check
+#########################
+
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+temp_Max_VIF = 5
+Max_VIF = 5
+Train_X_Copy = Train_X.copy()
+counter = 1
+High_VIF_Column_Names = []
+
+while (temp_Max_VIF >= Max_VIF):
+    
+    print(counter)
+    
+    # Create an empty temporary df to store VIF values
+    Temp_VIF_Df = pd.DataFrame()
+    
+    # Calculate VIF using list comprehension
+    Temp_VIF_Df['VIF'] = [variance_inflation_factor(Train_X_Copy.values, i) for i in range(Train_X_Copy.shape[1])]
+    
+    # Create a new column "Column_Name" to store the col names against the VIF values from list comprehension
+    Temp_VIF_Df['Column_Name'] = Train_X_Copy.columns
+    
+    # Drop NA rows from the df - If there is some calculation error resulting in NAs
+    Temp_VIF_Df.dropna(inplace=True)
+    
+    # Sort the df based on VIF values, then pick the top most column name (which has the highest VIF)
+    Temp_Column_Name = Temp_VIF_Df.sort_values(["VIF"])[-1:]["Column_Name"].values[0]
+    
+    # Store the max VIF value in temp_Max_VIF
+    temp_Max_VIF = Temp_VIF_Df.sort_values(["VIF"])[-1:]["VIF"].values[0]
+    print(Temp_Column_Name)
+    
+    if (temp_Max_VIF >= Max_VIF): 
+        
+
+        Train_X_Copy = Train_X_Copy.drop(Temp_Column_Name, axis = 1)    
+        High_VIF_Column_Names.append(Temp_Column_Name)
+    
+    counter = counter + 1
+
+High_VIF_Column_Names
+
+
+High_VIF_Column_Names.remove('const') 
+High_VIF_Column_Names
+
+Train_X = Train_X.drop(High_VIF_Column_Names, axis = 1)
+Test_X = Test_X.drop(High_VIF_Column_Names, axis = 1)
+
+Train_X.shape
+Test_X.shape
+
+#########################
+# Model Building
+#########################
+
+from statsmodels.api import OLS
+M1_ModelDef = OLS(Train_Y, Train_X) 
+M1_ModelBuild = M1_ModelDef.fit() 
+M1_ModelBuild.summary() 
+
+
+
+
+# Extract/ Identify p-values from model
+dir(M1_ModelBuild)
+M1_ModelBuild.pvalues
+
+#########################
+# Model Optimization
+#########################
+
+
+Temp_Max_PValue = 0.1
+Max_PValue = 0.1
+Train_X_Copy = Train_X.copy()
+counter = 1
+High_PValue_Column_Names = []
+
+
+while (Temp_Max_PValue >= Max_PValue):
+    
+    
+    Temp_Model_Df = pd.DataFrame()    
+    Model = OLS(Train_Y, Train_X_Copy).fit()
+    Temp_Model_Df['PValue'] = Model.pvalues
+    Temp_Model_Df['Column_Name'] = Train_X_Copy.columns
+    Temp_Model_Df.dropna(inplace=True) 
+    Temp_Column_Name = Temp_Model_Df.sort_values(["PValue"])[-1:]["Column_Name"].values[0]
+    Temp_Max_PValue = Temp_Model_Df.sort_values(["PValue"])[-1:]["PValue"].values[0]
+    
+    if (Temp_Max_PValue >= Max_PValue): 
+        print(Temp_Column_Name, Temp_Max_PValue)    
+        Train_X_Copy = Train_X_Copy.drop(Temp_Column_Name, axis = 1)    
+        High_PValue_Column_Names.append(Temp_Column_Name)
+    
+    counter = counter + 1
+
+High_PValue_Column_Names
+
+# Check final model summary
+Model.summary()
+Train_X = Train_X.drop(High_PValue_Column_Names, axis = 1)
+Test_X = Test_X.drop(High_PValue_Column_Names, axis = 1)
+
+Train_X.shape
+Test_X.shape
+
+# Build model on Train_X, Train_Y (after removing insignificant columns)
+Model = OLS(Train_Y, Train_X).fit()
+Model.summary()
+
+#########################
+# Model Prediction
+#########################
+
+
+Test_Pred = Model.predict(Test_X)
+Test_Pred[0:6]
+Test_Y[:6]
+
+#########################
+# Model Diagnostics
+#########################
+
+import seaborn as sns
+
+# # Homoskedasticity check
+sns.scatterplot(Model.fittedvalues, Model.resid) # Should not show prominent non-constant variance (heteroskadastic) of errors against fitted values
+# Normality of errors check
+sns.distplot(Model.resid) # Should be somewhat close to normal distribution
+
+
+#########################
+# Model Evaluation
+#########################
+
+# RMSE
+np.sqrt(np.mean((Test_Y - Test_Pred)**2))
+
+# MAPE
+(np.mean(np.abs(((Test_Y - Test_Pred)/Test_Y))))*100
