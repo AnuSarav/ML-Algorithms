@@ -1,0 +1,329 @@
+import os
+import pandas as pd
+import numpy as np
+
+os.chdir("C:/Users/aaa/Downloads/")
+
+FullRaw = pd.read_csv('BankCreditCard.csv')
+
+
+############################
+# Sampling: Divide the data into Train and Testset
+############################
+
+from sklearn.model_selection import train_test_split
+TrainRaw, TestRaw = train_test_split(FullRaw, train_size=0.7, random_state = 123)
+
+
+# Create Source Column in both Train and Test
+TrainRaw['Source'] = 'Train'
+TestRaw['Source'] = 'Test'
+
+# Combine Train and Test
+FullRaw = pd.concat([TrainRaw, TestRaw], axis = 0)
+FullRaw.shape
+# Check for NAs
+FullRaw.isnull().sum()
+
+# % Split of 0s and 1s
+FullRaw.loc[FullRaw['Source'] == 'Train', \
+            'Default_Payment'].value_counts()/ \
+    FullRaw[FullRaw['Source'] == 'Train'].shape[0]
+
+
+
+# Summarize the data
+FullRaw_Summary = FullRaw.describe()
+# FullRaw_Summary = FullRaw.describe(include = "all")
+
+
+FullRaw.drop(['Customer ID'], axis = 1, inplace = True) 
+FullRaw.shape
+
+############################
+# Use data description excel sheet to convert numeric variables to categorical variables
+############################
+
+# Categorical variables: Gender, Academic_Qualification, Marital
+
+Variable_To_Update = 'Gender'
+FullRaw[Variable_To_Update] = FullRaw[Variable_To_Update].astype("category")
+FullRaw.dtypes
+FullRaw[Variable_To_Update].cat.categories # To check the categories & their "category order"
+FullRaw[Variable_To_Update].cat.rename_categories(['Male', 'Female'], inplace = True)
+FullRaw[Variable_To_Update].cat.categories
+
+Variable_To_Update = 'Academic_Qualification'
+FullRaw[Variable_To_Update] = FullRaw[Variable_To_Update].astype("category")
+FullRaw.dtypes
+FullRaw[Variable_To_Update].cat.categories # To check the categories & their "category order"
+FullRaw[Variable_To_Update].cat.rename_categories(["Undergraduate",
+                                                   "Graduate",
+                                                   "Postgraduate",
+                                                   "Professional",
+                                                   "Others",
+                                                   "Unknown"], inplace = True)
+FullRaw[Variable_To_Update].cat.categories
+
+
+Variable_To_Update = 'Marital'
+FullRaw[Variable_To_Update] = FullRaw[Variable_To_Update].astype("category")
+FullRaw.dtypes
+FullRaw[Variable_To_Update].cat.categories # To check the categories & their "category order"
+FullRaw[Variable_To_Update].cat.rename_categories(["Unknown",
+                                                    "Married",
+                                                    "Single",
+                                                    "Unknown"], inplace = True) # Error
+
+Condition_List = [FullRaw[Variable_To_Update] == 0, 
+                  FullRaw[Variable_To_Update] == 1,
+                  FullRaw[Variable_To_Update] == 2,
+                  FullRaw[Variable_To_Update] == 3]
+Choice_List = ['Unknown', 'Married', 'Single', 'Unknown']
+
+FullRaw[Variable_To_Update] = np.select(Condition_List, Choice_List)
+FullRaw[Variable_To_Update].unique()
+
+############################
+# Dummy variable creation
+############################
+
+FullRaw2 = pd.get_dummies(FullRaw, drop_first = True) 
+FullRaw2.shape
+
+
+############################
+# Divide the data into Train and Test
+############################
+
+
+Train = FullRaw2[FullRaw2['Source_Train'] == 1].drop(['Source_Train'], axis = 1).copy()
+Test = FullRaw2[FullRaw2['Source_Train'] == 0].drop(['Source_Train'], axis = 1).copy()
+
+
+Train_X = Train.drop(['Default_Payment'], axis = 1).copy()
+Train_Y = Train['Default_Payment'].copy()
+Test_X = Test.drop(['Default_Payment'], axis = 1).copy()
+Test_Y = Test['Default_Payment'].copy()
+
+Train_X.shape
+Test_X.shape
+
+############################
+# Add Intercept Column
+############################
+
+from statsmodels.api import add_constant
+Train_X = add_constant(Train_X)
+Test_X = add_constant(Test_X)
+
+Train_X.shape
+Test_X.shape
+
+#########################
+# VIF check
+#########################
+from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+temp_Max_VIF = 10
+Max_VIF = 10
+Train_X_Copy = Train_X.copy()
+counter = 1
+High_VIF_Column_Names = []
+
+while (temp_Max_VIF >= Max_VIF):
+    
+    print(counter)
+    
+    Temp_VIF_Df = pd.DataFrame()
+    Temp_VIF_Df['VIF'] = [variance_inflation_factor(Train_X_Copy.values, i) for i in range(Train_X_Copy.shape[1])]
+    Temp_VIF_Df['Column_Name'] = Train_X_Copy.columns
+    Temp_VIF_Df.dropna(inplace=True) # If there is some calculation error resulting in NAs
+    Temp_Column_Name = Temp_VIF_Df.sort_values(["VIF"])[-1:]["Column_Name"].values[0]
+    temp_Max_VIF = Temp_VIF_Df.sort_values(["VIF"])[-1:]["VIF"].values[0]
+    print(Temp_Column_Name)
+    
+    if (temp_Max_VIF >= Max_VIF): # This condition will ensure that columns having VIF lower than 5 are NOT dropped
+        Train_X_Copy = Train_X_Copy.drop(Temp_Column_Name, axis = 1)    
+        High_VIF_Column_Names.append(Temp_Column_Name)
+    
+    counter = counter + 1
+
+High_VIF_Column_Names
+
+
+High_VIF_Column_Names.remove('const') 
+
+Train_X = Train_X.drop(High_VIF_Column_Names, axis = 1)
+Test_X = Test_X.drop(High_VIF_Column_Names, axis = 1)
+
+
+
+########################
+# Model building
+########################
+
+
+from statsmodels.api import Logit  
+M1 = Logit(Train_Y, Train_X) 
+M1_Model = M1.fit() 
+M1_Model.summary() 
+
+
+########################
+# Manual model selection. 
+########################
+
+# Drop Marital_Unknown
+Cols_To_Drop = ["Marital_Unknown"]
+M2 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M2.summary()
+
+
+# Drop April_Bill_Amount
+Cols_To_Drop.append('April_Bill_Amount')
+M3 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M3.summary()
+
+# Drop June_Bill_Amount
+Cols_To_Drop.append('June_Bill_Amount')
+M5 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M5.summary()
+
+# Drop Academic_Qualification_Postgraduate
+Cols_To_Drop.append('Academic_Qualification_Postgraduate')
+M6 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M6.summary()
+
+# Drop Academic_Qualification_Graduate 
+Cols_To_Drop.append('Academic_Qualification_Graduate')
+M6 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M6.summary()
+
+# Drop Age_Years
+Cols_To_Drop.append('Age_Years')
+M7 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M7.summary()
+
+# Drop Repayment_Status_Feb
+Cols_To_Drop.append('Repayment_Status_Feb')
+M8 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M8.summary()
+
+# # Drop Academic_Qualification_Undergraduate
+# Cols_To_Drop.append('Academic_Qualification_Undergraduate')
+# M9 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+# M9.summary()
+
+# # Drop Previous_Payment_May
+# Cols_To_Drop.append('Previous_Payment_May')
+# M10 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+# M10.summary()
+
+# Drop Repayment_Status_April
+Cols_To_Drop.append('Repayment_Status_April')
+M11 = Logit(Train_Y, Train_X.drop(Cols_To_Drop, axis = 1)).fit() # (Dep_Var, Indep_Vars)
+M11.summary()
+
+############################
+# Prediction and Validation
+############################
+
+Train_X = Train_X.drop(Cols_To_Drop, axis = 1)
+Test_X = Test_X.drop(Cols_To_Drop, axis = 1) 
+
+Train_X.shape
+Test_X.shape
+
+
+
+Test_X['Test_Prob'] = M11.predict(Test_X) 
+Test_X.columns 
+Test_X['Test_Prob'][0:6]
+Test_Y[:6]
+
+# Classify 0 or 1 based on 0.5 cutoff
+import numpy as np
+Test_X['Test_Class'] = np.where(Test_X['Test_Prob'] >= 0.5, 1, 0)
+Test_X.columns 
+
+
+########################
+# Confusion matrix
+########################
+
+Confusion_Mat = pd.crosstab(Test_X['Test_Class'], Test_Y) # R, C format
+Confusion_Mat
+
+# Check the accuracy of the model
+(sum(np.diagonal(Confusion_Mat))/Test_X.shape[0])*100 # ~82%
+
+########################
+# F1 Score
+########################
+
+from sklearn.metrics import f1_score, precision_score, recall_score
+f1_score(Test_Y, Test_X['Test_Class']) # Actual, Predicted
+precision_score(Test_Y, Test_X['Test_Class']) # Actual, Predicted
+recall_score(Test_Y, Test_X['Test_Class']) # Actual, Predicted
+
+
+
+# Precision and Recall
+P = precision_score(Test_Y, Test_X['Test_Class']) # Actual, Predicted
+P
+R = recall_score(Test_Y, Test_X['Test_Class']) # Actual, Predicted
+R
+2*P*R/(P+R) # F1-Score Manual Calculation
+
+
+########################
+# AUC and ROC Curve
+########################
+
+from sklearn.metrics import roc_curve, auc
+# Predict on train data
+Train_Prob = M11.predict(Train_X)
+
+# Calculate FPR, TPR and Cutoff Thresholds
+fpr, tpr, cutoff = roc_curve(Train_Y, Train_Prob)
+
+
+# Cutoff Table Creation
+Cutoff_Table = pd.DataFrame()
+Cutoff_Table['FPR'] = fpr 
+Cutoff_Table['TPR'] = tpr
+Cutoff_Table['Cutoff'] = cutoff
+
+# Plot ROC Curve
+import seaborn as sns
+sns.lineplot(Cutoff_Table['FPR'], Cutoff_Table['TPR'])
+
+# Area under curve (AUC)
+auc(fpr, tpr)
+
+
+
+############################
+# Improve Model Output Using New Cutoff Point
+############################
+
+import numpy as np
+Cutoff_Table['Distance'] = np.sqrt((1-Cutoff_Table['TPR'])**2 + (0-Cutoff_Table['FPR'])**2) # Euclidean Distance
+Cutoff_Table['MaxDiffBetweenTPRFPR'] = Cutoff_Table['TPR'] - Cutoff_Table['FPR'] # Max Diff. Bet. TPR & FPR
+
+# New Cutoff Point Performance (Obtained after studying ROC Curve and Cutoff Table)
+cutoffPoint = 0.19655 # Max Difference between TPR & FPR
+
+# Classify the test predictions into classes of 0s and 1s
+Test_X['Test_Class2'] = np.where(Test_X['Test_Prob'] >= cutoffPoint, 1, 0)
+
+# Confusion Matrix
+Confusion_Mat2 = pd.crosstab(Test_X['Test_Class2'], Test_Y) # R, C format
+Confusion_Mat2
+
+# Model Evaluation Metrics
+sum(np.diagonal(Confusion_Mat2))/Test_X.shape[0]*100
+f1_score(Test_Y, Test_X['Test_Class2'], Test_Y)
+precision_score(Test_Y, Test_X['Test_Class2'], Test_Y)
+recall_score(Test_Y, Test_X['Test_Class2'], Test_Y)
