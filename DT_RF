@@ -1,0 +1,254 @@
+import os
+import pandas as pd
+import numpy as np
+
+os.chdir("C:\\Users\\aaa\\Downloads\\")
+
+FullRaw = pd.read_csv('Telecom_Churn.csv')
+
+# Check for NAs
+FullRaw.isnull().sum()
+
+# Summarize the data
+FullRaw_Summary = FullRaw.describe()
+
+# Remove Customer Id columns
+FullRaw.drop(['customerID'], axis = 1, inplace = True)
+
+
+########################
+# Manual recoding of "Dependent Variable"
+########################
+
+# We will manually convert our categorical dependent variable to numeric
+FullRaw['Churn'] = np.where(FullRaw['Churn'] == 'Yes', 1, 0)
+
+
+
+########################
+# Dummy variable creation
+########################
+
+# Dummy variable creation
+FullRaw2 = pd.get_dummies(FullRaw)
+FullRaw2.shape
+
+############################
+# Sampling: Divide the data into Train and Testset
+############################
+
+from sklearn.model_selection import train_test_split
+Train, Test = train_test_split(FullRaw2, train_size=0.7, random_state = 123)
+
+########################
+# Sampling into X and Y
+########################
+
+# Divide each dataset into Indep Vars and Dep var
+Train_X = Train.drop('Churn', axis = 1).copy()
+Train_Y = Train['Churn'].copy()
+Test_X = Test.drop('Churn', axis = 1).copy()
+Test_Y = Test['Churn'].copy()
+
+Train_X.shape
+Test_X.shape
+
+########################################
+# Decision Tree Model
+########################################
+
+from sklearn.tree import DecisionTreeClassifier
+
+M1 = DecisionTreeClassifier(random_state=123)
+M1 = M1.fit(Train_X, Train_Y) # Indep, Dep
+
+
+########################################
+# Model Visualization
+########################################
+
+import pydotplus 
+from sklearn.tree import export_graphviz
+
+
+dot_data = export_graphviz(M1, out_file=None, feature_names = Train_X.columns) 
+
+
+graph = pydotplus.graph_from_dot_data(dot_data) # Error  
+
+
+graph.write_pdf("Churn_DT_Plot.pdf") 
+dir(graph)
+
+
+
+############################
+# Prediction and Validation
+############################
+
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+
+# Prediction on testset
+Test_Pred = M1.predict(Test_X)
+
+# Classification Model Validation
+Confusion_Mat = confusion_matrix(Test_Y, Test_Pred)
+Confusion_Mat # R, C format (Actual = Test_Y, Predicted = Test_Pred)
+
+# Check the accuracy of the model
+sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100 # 84.86%
+
+
+precision_score(Test_Y, Test_Pred)
+recall_score(Test_Y, Test_Pred) 
+f1_score(Test_Y, Test_Pred) 
+Confusion_Mat[0][1]/sum(Confusion_Mat[0])
+
+
+############
+# DT Model 2
+############
+
+# Build Model
+M2 = DecisionTreeClassifier(random_state=123, min_samples_leaf = 500)
+M2 = M2.fit(Train_X, Train_Y)
+
+# Vizualize Model
+dot_data = export_graphviz(M2,feature_names = Train_X.columns)
+graph = pydotplus.graph_from_dot_data(dot_data)  
+graph.write_pdf("Churn_DT_Plot3.pdf") 
+
+# Prediction on testset
+Test_Pred = M2.predict(Test_X)
+
+# Classification Model Validation
+Confusion_Mat = confusion_matrix(Test_Y, Test_Pred)
+Confusion_Mat 
+
+# Check the accuracy of the model
+sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100 # 76.27%
+
+precision_score(Test_Y, Test_Pred) 
+recall_score(Test_Y, Test_Pred) 
+f1_score(Test_Y, Test_Pred) 
+Confusion_Mat[0][1]/sum(Confusion_Mat[0]) 
+
+
+########################################
+# Random Forest
+########################################
+
+from sklearn.ensemble import RandomForestClassifier
+
+M1_RF = RandomForestClassifier(random_state = 123)
+M1_RF = M1_RF.fit(Train_X, Train_Y)
+Test_Pred = M1_RF.predict(Test_X)
+
+# Confusion Matrix
+Confusion_Mat = confusion_matrix(Test_Y, Test_Pred) 
+Confusion_Mat 
+
+# Evaluation
+(sum(np.diag(Confusion_Mat))/Test_Y.shape[0])*100 # 88.48%
+precision_score(Test_Y, Test_Pred) 
+recall_score(Test_Y, Test_Pred) 
+f1_score(Test_Y, Test_Pred) 
+
+
+# Variable importance
+M1_RF.feature_importances_
+
+Var_Importance_Df = pd.concat([pd.DataFrame(M1_RF.feature_importances_),
+                               pd.DataFrame(Train_X.columns)], axis = 1)
+
+Var_Importance_Df
+Var_Importance_Df.columns = ["Value", "Variable_Name"]
+Var_Importance_Df.sort_values("Value", ascending = False, inplace = True)
+Var_Importance_Df
+
+
+import seaborn as sns
+plot = sns.scatterplot(x = "Variable_Name", y = "Value", data = Var_Importance_Df) 
+
+
+#################
+# RF Model with tuning parameters
+#################
+
+M2_RF = RandomForestClassifier(random_state=123, n_estimators = 25, 
+                               max_features = 5, min_samples_leaf = 500)
+M2_RF = M2_RF.fit(Train_X, Train_Y)
+Test_Pred = M2_RF.predict(Test_X)
+
+# Confusion Matrix
+Confusion_Mat = confusion_matrix(Test_Y, Test_Pred)
+Confusion_Mat 
+
+
+
+#################
+# Manual Grid Searching
+#################
+
+n_estimators_List = [25, 50, 75]
+max_features_List = [5, 7, 9] 
+min_samples_leaf_List = [100, 200] 
+Counter = 0
+
+Tree_List = []
+Num_Features_List = []
+Samples_List = []
+Accuracy_List = []
+
+Model_Validation_Df = pd.DataFrame()
+Model_Validation_Df2 = pd.DataFrame()
+Model_Validation_Df3 = pd.DataFrame()
+
+for i in n_estimators_List:    
+    for j in max_features_List:        
+        for k in min_samples_leaf_List:                        
+            Counter = Counter + 1
+            print(Counter)
+#            print(i,j,k)            
+            Temp_Model = RandomForestClassifier(random_state=123, n_estimators = i, 
+                                                max_features = j, min_samples_leaf = k)
+            Temp_Model = Temp_Model.fit(Train_X, Train_Y)
+            Test_Pred = Temp_Model.predict(Test_X)                 
+            Confusion_Mat = confusion_matrix(Test_Y, Test_Pred)
+            Temp_Accuracy = (sum(np.diag(Confusion_Mat))/Test_Y.shape[0])*100            
+#            print(i,i,k,Temp_Accuracy)
+            
+            # Alteranate 1
+            Tree_List.append(i)
+            Num_Features_List.append(j)
+            Samples_List.append(k)
+            Accuracy_List.append(Temp_Accuracy)
+            
+            # Alertnate 2
+            tempDf = pd.DataFrame([[i,j,k,Temp_Accuracy]]) # [[]] will produce a single row with values, [] will produce single column with values
+            Model_Validation_Df2 = Model_Validation_Df2.append(tempDf)
+            
+            
+Model_Validation_Df = pd.DataFrame({'Trees': Tree_List, 'Max_Features': Num_Features_List, 
+                                    'Min_Samples': Samples_List, 'Accuracy': Accuracy_List})
+    
+Model_Validation_Df2.columns = ['Trees', 'Max_Features', 'Min_Samples', 'Accuracy']
+
+########################################
+# Random Forest using GridSearchCV
+########################################
+
+from sklearn.model_selection import GridSearchCV
+
+my_param_grid = {'n_estimators': [25, 50, 75], 
+                 'max_features': [5, 7, 9], 
+                 'min_samples_leaf' : [100, 200]} 
+
+Grid_Search_Model = GridSearchCV(estimator = RandomForestClassifier(random_state=123), 
+                     param_grid=my_param_grid,  
+                     scoring='accuracy', 
+                     cv=3).fit(Train_X, Train_Y) 
+
+
+Model_Validation_Df4 = pd.DataFrame.from_dict(Grid_Search_Model.cv_results_)
+Grid_Search_Model.cv_results_
