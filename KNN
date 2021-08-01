@@ -1,0 +1,180 @@
+import os
+import pandas as pd
+
+os.chdir("C:/Users/aaa/Downloads/")
+
+FullRaw = pd.read_csv("cancerdata.csv")
+
+###################
+# Missing Value Check
+###################
+
+FullRaw.isnull().sum()
+
+
+###################
+# Recode Categorical variables to Numeric (dummy variable creation)
+###################
+
+import numpy as np
+
+FullRaw.dtypes 
+FullRaw['diagnosis'] = np.where(FullRaw['diagnosis'] == 'M', 0, 1)
+
+###################
+# Drop id column
+###################
+
+FullRaw.drop(['id'], axis = 1, inplace = True)
+FullRaw.shape
+
+###################
+# Sampling
+###################
+
+from sklearn.model_selection import train_test_split
+Train, Test = train_test_split(FullRaw, train_size = 0.8, random_state = 123)
+
+Train_X = Train.drop(['diagnosis'], axis = 1).copy()
+Train_Y = Train['diagnosis'].copy()
+Test_X = Test.drop(['diagnosis'], axis = 1).copy()
+Test_Y = Test['diagnosis'].copy()
+
+Train_X.shape
+Test_X.shape
+
+###################
+# Standardization
+###################
+
+from sklearn.preprocessing import StandardScaler
+
+Train_Scaling = StandardScaler().fit(Train_X) # Train_Scaling contains means, std_dev of training dataset
+Train_X_Std = Train_Scaling.transform(Train_X) # This step standardizes the train data
+Test_X_Std  = Train_Scaling.transform(Test_X) # This step standardizes the test data
+
+# Add the column names to Train_X_Std, Test_X_Std
+Train_X_Std = pd.DataFrame(Train_X_Std, columns = Train_X.columns)
+Test_X_Std = pd.DataFrame(Test_X_Std, columns = Test_X.columns)
+
+###################
+# Model building
+###################
+
+from sklearn.neighbors import KNeighborsClassifier
+M1 = KNeighborsClassifier(n_neighbors=3).fit(Train_X_Std, Train_Y)
+
+###################
+# Model prediction
+###################
+
+# Class Prediction
+Test_Pred = M1.predict(Test_X_Std)
+
+# Probability Prediction
+Test_Prob = M1.predict_proba(Test_X_Std)
+Test_Prob_Df = pd.DataFrame(Test_Prob)
+Test_Prob_Df['Class'] = Test_Pred
+
+###################
+# Model evaluation
+###################
+
+from sklearn.metrics import confusion_matrix, precision_score, recall_score, f1_score
+
+Confusion_Mat = confusion_matrix(Test_Y, Test_Pred)
+Confusion_Mat
+
+sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100 # Accuracy
+precision_score(Test_Y, Test_Pred) 
+recall_score(Test_Y, Test_Pred) 
+f1_score(Test_Y, Test_Pred) 
+Confusion_Mat[0][1]/sum(Confusion_Mat[0]) 
+
+
+###################
+# Grid Search CV
+###################
+             
+from sklearn.model_selection import GridSearchCV
+
+myNN = range(1,14,2) 
+myP = range(1,4,1) 
+my_param_grid = {'n_neighbors': myNN, 'p': myP} 
+
+Grid_Search_Model = GridSearchCV(estimator = KNeighborsClassifier(), 
+                     param_grid=my_param_grid,  
+                     scoring='accuracy', 
+                     cv=5, n_jobs=-1).fit(Train_X_Std, Train_Y)
+
+
+Grid_Search_Df = pd.DataFrame.from_dict(Grid_Search_Model.cv_results_)
+
+
+###################      
+###################
+# Data Re-Distribution 
+###################
+###################           
+           
+import seaborn as sns
+import numpy as np
+
+Train_X.columns
+columnsToConsider = ["perimeter_mean", "area_mean", "perimeter_worst", "area_worst"]
+
+# Histogram using seaborn
+sns.pairplot(Train_X[columnsToConsider])
+
+# Lets consider Area Mean and apply log transformation
+Train_X_Copy = Train_X.copy()
+Train_X_Copy["area_mean"] = np.log(np.where(Train_X_Copy["area_mean"] == 0, 1, Train_X_Copy["area_mean"]))
+Train_X_Copy["perimeter_worst"] = np.log(np.where(Train_X_Copy["perimeter_worst"] == 0, 1, Train_X_Copy["perimeter_worst"]))
+Train_X_Copy["area_worst"] = np.log(np.where(Train_X_Copy["area_worst"] == 0, 1, Train_X_Copy["area_worst"]))
+
+Test_X_Copy = Test_X.copy()
+Test_X_Copy["area_mean"] = np.log(np.where(Test_X_Copy["area_mean"] == 0, 1, Test_X_Copy["area_mean"]))
+Test_X_Copy["perimeter_worst"] = np.log(np.where(Test_X_Copy["perimeter_worst"] == 0, 1, Test_X_Copy["perimeter_worst"]))
+Test_X_Copy["area_worst"] = np.log(np.where(Test_X_Copy["area_worst"] == 0, 1, Test_X_Copy["area_worst"]))
+
+# Histogram using seaborn
+sns.pairplot(Train_X_Copy[columnsToConsider])
+
+
+###################
+# Standardization
+###################
+
+Train_Scaling = StandardScaler().fit(Train_X_Copy)
+Train_X_Std = Train_Scaling.transform(Train_X_Copy) 
+Test_X_Std  = Train_Scaling.transform(Test_X_Copy) 
+
+# Add the column names to Train_X_Std, Test_X_Std
+Train_X_Std = pd.DataFrame(Train_X_Std, columns = Train_X.columns)
+Test_X_Std = pd.DataFrame(Test_X_Std, columns = Test_X.columns)
+
+
+
+###################
+# Modeling
+###################
+
+# Build model
+M2 = KNeighborsClassifier(n_neighbors=3).fit(Train_X_Std, Train_Y)
+
+# Class Prediction
+Test_Pred = M2.predict(Test_X_Std)
+
+###################
+# Model evaluation
+###################
+
+Confusion_Mat = confusion_matrix(Test_Y, Test_Pred)
+Confusion_Mat
+
+sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100
+precision_score(Test_Y, Test_Pred) 
+recall_score(Test_Y, Test_Pred) 
+f1_score(Test_Y, Test_Pred)
+Confusion_Mat[0][1]/sum(Confusion_Mat[0]) 
+
