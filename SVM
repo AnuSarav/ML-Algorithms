@@ -1,0 +1,276 @@
+import os
+import pandas as pd
+import numpy as np
+
+os.chdir("C:/Users/aaa/Downloads/")
+
+FullRaw = pd.read_csv('BankCreditCard.csv')
+
+
+############################
+# Sampling: Divide the data into Train and Testset
+############################
+
+from sklearn.model_selection import train_test_split
+TrainRaw, TestRaw = train_test_split(FullRaw, train_size=0.7, random_state = 999)
+
+
+# Create Source Column in both Train and Test
+TrainRaw['Source'] = 'Train'
+TestRaw['Source'] = 'Test'
+
+# Combine Train and Test
+FullRaw = pd.concat([TrainRaw, TestRaw], axis = 0)
+
+# Check for NAs
+FullRaw.isnull().sum()
+
+# % Split of 0s and 1s
+FullRaw.loc[FullRaw['Source'] == 'Train', 'Default_Payment'].value_counts()/FullRaw.loc[FullRaw['Source'] == 'Train'].shape[0]
+
+
+# Summarize the data
+FullRaw_Summary = FullRaw.describe()
+
+FullRaw.drop(['Customer ID'], axis = 1, inplace = True) 
+
+FullRaw.shape
+
+
+############################
+# Use data description excel sheet to convert numeric variables to categorical variables
+############################
+
+# Categorical variables: Gender, Academic_Qualification, Marital
+
+Variable_To_Update = 'Gender'
+FullRaw[Variable_To_Update].unique()
+#np.select(condlist, choicelist)
+
+Condition_List = [FullRaw[Variable_To_Update] == 1, FullRaw[Variable_To_Update] == 2]
+Choice_List = ['Male', 'Female']
+FullRaw[Variable_To_Update] = np.select(Condition_List, Choice_List)
+FullRaw[Variable_To_Update].unique()
+
+Variable_To_Update = 'Academic_Qualification'
+FullRaw[Variable_To_Update].unique()
+Condition_List = [FullRaw[Variable_To_Update] == 1, 
+                  FullRaw[Variable_To_Update] == 2,
+                  FullRaw[Variable_To_Update] == 3,
+                  FullRaw[Variable_To_Update] == 4,
+                  FullRaw[Variable_To_Update] == 5,
+                  FullRaw[Variable_To_Update] == 6]
+Choice_List = ['Undergraduate', 'Graduate', 'Postgraduate', 'Professional', 'Others', 'Unknown']
+FullRaw[Variable_To_Update] = np.select(Condition_List, Choice_List)
+
+Variable_To_Update = 'Marital'
+FullRaw[Variable_To_Update].unique()
+Condition_List = [FullRaw[Variable_To_Update] == 0, 
+                  FullRaw[Variable_To_Update] == 1,
+                  FullRaw[Variable_To_Update] == 2,
+                  FullRaw[Variable_To_Update] == 3]
+Choice_List = ['Unknown', 'Married', 'Single', 'Unknown']
+FullRaw[Variable_To_Update] = np.select(Condition_List, Choice_List)
+
+FullRaw.shape
+
+
+
+#########################
+## Combining "Academic_Qualification" variable categories using a function
+#########################
+
+ColumnsToCombine = ['Academic_Qualification']
+DependentVarColumnName = 'Default_Payment'
+OneDependentCategoryName = 1 
+
+def combine_categories(ColumnsToCombine, DependentColumnName, OneDependentCategoryName, Df):
+    
+    for IndepColumnName in ColumnsToCombine:
+        
+        tempNewColumnName = IndepColumnName + '_New'
+        Df[tempNewColumnName] = Df[IndepColumnName]
+        
+        # Step 1: Making Proportion Table
+        tempDf = Df[Df['Source'] == 'Train']
+        D1 = pd.crosstab(tempDf[IndepColumnName], tempDf[DependentColumnName], margins = True)
+        D1['Category_Proportion'] = round(D1[OneDependentCategoryName]/D1['All'],1)
+        
+        # Step 2: Find the unique category values 
+        UniqueValues = D1[D1['Category_Proportion'].duplicated()]['Category_Proportion'].unique()
+        
+        # Step 3: Combining Categories
+        for value in UniqueValues:
+            
+            tempDuplicateCategoryNames = D1.index[D1['Category_Proportion'] == value] # Find the category "NAMES" having the same the proportion value
+            newCombinedCategoryName = IndepColumnName + "_" + str(value)
+            Df[tempNewColumnName] = np.where(Df[tempNewColumnName].isin(tempDuplicateCategoryNames), 
+              newCombinedCategoryName, Df[tempNewColumnName])
+        
+        # Drop the original column before returning the modified dataframe
+        Df2 = Df.drop([IndepColumnName], axis = 1).copy()
+        
+    return(Df2)
+
+# Before combining categories
+FullRaw['Academic_Qualification'].nunique()
+FullRaw.columns
+FullRaw.shape
+  
+FullRaw2 = combine_categories(ColumnsToCombine, DependentVarColumnName, 
+                               OneDependentCategoryName, FullRaw)
+FullRaw2.columns
+    
+# After combining categories
+FullRaw2['Academic_Qualification_New'].nunique() 
+FullRaw2.columns
+FullRaw2.shape
+
+
+############################
+# Dummy variable creation
+############################
+
+
+FullRaw2 = pd.get_dummies(FullRaw2) 
+FullRaw2.drop('Source_Test', axis = 1, inplace = True)
+# FullRaw2.shape
+
+############################
+# Divide the data into Train and Test
+############################
+
+# Step 1: Divide into Train and Testest
+Train = FullRaw2[FullRaw2['Source_Train'] == 1].drop(['Source_Train'], axis = 1).copy()
+Test = FullRaw2[FullRaw2['Source_Train'] == 0].drop(['Source_Train'], axis = 1).copy()
+
+
+# Step 2: Divide into Xs (Independents) and Y (Dependent)
+Train_X = Train.drop(['Default_Payment'], axis = 1).copy()
+Train_Y = Train['Default_Payment'].copy()
+Test_X = Test.drop(['Default_Payment'], axis = 1).copy()
+Test_Y = Test['Default_Payment'].copy()
+
+Train_X.shape
+Test_X.shape
+
+
+########################
+# Modeling
+########################
+
+from sklearn.svm import SVC
+from sklearn.metrics import confusion_matrix, f1_score
+
+#############
+# Model1
+#############
+
+M1 = SVC() 
+M1_Model = M1.fit(Train_X, Train_Y) 
+
+Test_Class = M1_Model.predict(Test_X)
+Confusion_Mat = confusion_matrix(Test_Y, Test_Class)
+
+sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100
+f1_score(Test_Y, Test_Class) 
+Confusion_Mat
+
+
+# M2 = SVC(kernel = "poly") 
+# M2_Model = M2.fit(Train_X, Train_Y) 
+# Test_Class = M2_Model.predict(Test_X)
+# Confusion_Mat = confusion_matrix(Test_Y, Test_Class)
+# Confusion_Mat
+# sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100
+# f1_score(Test_Y, Test_Class)
+
+
+# M3 = SVC(kernel='linear') 
+# M3_Model = M3.fit(Train_X, Train_Y)
+# Test_Class = M3_Model.predict(Test_X)
+# Confusion_Mat = confusion_matrix(Test_Y, Test_Class)
+# sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100
+# f1_score(Test_Y, Test_Class) 
+
+
+
+###################
+# Modeling with Standardized Dataset
+###################
+
+from sklearn.preprocessing import StandardScaler
+
+Train_Scaling = StandardScaler().fit(Train_X) # Train_Scaling contains Means & SD of training dataset
+Train_X_Std = Train_Scaling.transform(Train_X) # This step standardizes the train data using Train Mean & SD
+Test_X_Std  = Train_Scaling.transform(Test_X) # This step standardizes the test data using Train Mean & SD
+
+# Add the column names to Train_X_Std, Test_X_Std
+Train_X_Std = pd.DataFrame(Train_X_Std, columns = Train_X.columns)
+Test_X_Std = pd.DataFrame(Test_X_Std, columns = Test_X.columns)
+
+
+
+M4 = SVC()
+M4_Model = M4.fit(Train_X_Std, Train_Y) 
+
+Test_Class = M4_Model.predict(Test_X_Std)
+Confusion_Mat = confusion_matrix(Test_Y, Test_Class)
+
+sum(np.diagonal(Confusion_Mat))/Test_X_Std.shape[0]*100
+f1_score(Test_Y, Test_Class)
+Confusion_Mat
+
+
+
+########################
+# Modeling using Random Search
+########################
+
+from sklearn.model_selection import RandomizedSearchCV
+myCost = [0.1, 1, 2]
+myGamma = [0.01, 0.1]
+myKernel = ['sigmoid','rbf']
+my_param_grid = {'C': myCost, 'gamma': myGamma, 'kernel': myKernel}
+SVM_RandomSearchCV = RandomizedSearchCV(SVC(), param_distributions=my_param_grid,  
+                                        scoring='f1', cv=3, n_iter = 2, verbose = 1, n_jobs = -1)
+
+
+SVM_RandomSearchCV = SVM_RandomSearchCV.fit(Train_X_Std, Train_Y)
+
+# Result in a dataframe
+SVM_RandomSearch_Df = pd.DataFrame.from_dict(SVM_RandomSearchCV.cv_results_)
+
+
+
+############################
+# Stratified sampling: Class  Imbalance/ Rare Events Handling using Under-sampling
+############################
+
+# pip install imblearn in command prompt (cmd)
+from imblearn.under_sampling import RandomUnderSampler
+
+
+# Count of 0s and 1s
+Train_Y.value_counts()
+
+RUS = RandomUnderSampler(sampling_strategy = 0.7, random_state = 123)
+
+Train_X_RUS, Train_Y_RUS = RUS.fit_resample(Train_X_Std, Train_Y)
+Train_X_RUS = pd.DataFrame(Train_X_RUS)
+Train_Y_RUS = pd.Series(Train_Y_RUS)
+
+
+
+Train_Y_RUS.value_counts() # Count of 0s and 1s
+Train_Y_RUS.value_counts()[1]/sum(Train_Y_RUS.value_counts())*100 # Percentage of 1s
+Train_Y_RUS.value_counts()[1]/Train_Y_RUS.value_counts()[0] # Ratio of 1s to 0s
+
+
+M5 = SVC()
+M5_Model = M5.fit(Train_X_RUS, Train_Y_RUS) 
+Test_Class = M5_Model.predict(Test_X_Std)
+Confusion_Mat = confusion_matrix(Test_Y, Test_Class)
+sum(np.diagonal(Confusion_Mat))/Test_X.shape[0]*100
+f1_score(Test_Y, Test_Class)
+Confusion_Mat
